@@ -1,46 +1,49 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="studio">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="theme-color" content="#0e1319" />
 <link rel="icon" href="data:," />
 <title>PrintPath — design to print</title>
+<script>try{if(localStorage.getItem('printpath.theme.v1')==='educator'||/[?&]theme=educator/.test(location.search))document.documentElement.dataset.theme='educator'}catch(e){}</script>
 </head>
 <body>
 <canvas id="c" aria-label="3D view"></canvas>
 <header id="top">
   <div class="brand"><b>PrintPath</b><span class="tag">prototype</span><span id="stepno">Step 1 of 4</span></div>
+  <div class="tools">
+    <div class="theme-seg" role="group" aria-label="Theme">
+      <button type="button" data-theme-btn="studio">Studio</button><button type="button" data-theme-btn="educator">Educator</button>
+    </div>
+    <button type="button" id="open-projects" class="proj-btn" aria-haspopup="dialog"><span aria-hidden="true">📚</span> Projects</button>
+  </div>
   <nav id="stepper" aria-label="Steps">
-    <button data-step="0" class="on"><i>1</i><span>Design</span></button>
-    <button data-step="1"><i>2</i><span>STL</span></button>
-    <button data-step="2"><i>3</i><span>Slice</span></button>
-    <button data-step="3"><i>4</i><span>Print</span></button>
+    <button data-step="0" class="on"><i class="num">1</i><i class="ico" aria-hidden="true">📐</i><span>Design</span></button>
+    <button data-step="1"><i class="num">2</i><i class="ico" aria-hidden="true">🔺</i><span>STL</span></button>
+    <button data-step="2"><i class="num">3</i><i class="ico" aria-hidden="true">🥞</i><span>Slice</span></button>
+    <button data-step="3"><i class="num">4</i><i class="ico" aria-hidden="true">🖨️</i><span>Print</span></button>
   </nav>
   <p id="explain"></p>
 </header>
 <section id="panel" aria-live="polite">
   <div id="panel-body">
+    <p id="tip" class="tip"></p>
     <div class="pane" data-pane="0">
-      <div class="ctl"><label for="p-width">Width</label><input id="p-width" type="range" min="20" max="80" step="1" /><output data-for="p-width"></output></div>
-      <div class="ctl"><label for="p-depth">Depth</label><input id="p-depth" type="range" min="20" max="60" step="1" /><output data-for="p-depth"></output></div>
-      <div class="ctl"><label for="p-height">Height</label><input id="p-height" type="range" min="3" max="12" step="0.5" /><output data-for="p-height"></output></div>
-      <div class="ctl"><label for="p-hole">Hole Ø</label><input id="p-hole" type="range" min="3" max="16" step="0.5" /><output data-for="p-hole"></output></div>
-      <div class="toggles">
-        <label class="tog"><input id="p-boss" type="checkbox" /><span>Boss</span></label>
-        <label class="tog"><input id="p-chamfer" type="checkbox" /><span>Chamfer corners</span></label>
-      </div>
+      <div class="ctl preset-row"><label for="d-preset">Shape</label><select id="d-preset"></select></div>
+      <div id="d-controls"></div>
       <p class="stat" id="design-stat"></p>
+      <p class="fine" id="design-note"></p>
     </div>
     <div class="pane" data-pane="1" hidden>
       <div class="kpis">
         <div><b id="stl-tris">–</b><span>triangles</span></div>
         <div><b id="stl-bin">–</b><span>binary STL</span></div>
-        <div><b id="stl-ascii">–</b><span>ASCII STL</span></div>
+        <div><b id="stl-ascii">–</b><span id="stl-ascii-cap">ASCII STL</span></div>
       </div>
       <div class="toggles">
         <label class="tog"><input id="stl-wire" type="checkbox" checked /><span>Show triangles</span></label>
-        <button id="stl-dl" class="btn primary">Download STL</button>
+        <button id="stl-dl" class="btn primary">⬇ Download STL</button>
       </div>
       <p class="fine">Highlighted facets, as written in an ASCII STL (Z-up). Arrows are the normals: which way is “outside”.</p>
       <div id="stl-facets" class="facet-tabs"></div>
@@ -82,6 +85,19 @@
     <button id="next" class="btn primary">Next ›</button>
   </footer>
 </section>
+<div id="projects" hidden role="dialog" aria-modal="true" aria-labelledby="pj-title">
+  <div class="pj-sheet">
+    <div class="pj-head"><h2 id="pj-title"><span aria-hidden="true">📚</span> Classroom projects</h2><button type="button" id="pj-close" class="pj-close" aria-label="Close projects">✕</button></div>
+    <div class="pj-filters">
+      <div class="chips" id="pj-tabs" role="group" aria-label="Show"></div>
+      <div class="chips" id="pj-grades" role="group" aria-label="Grade level"></div>
+      <div class="chips" id="pj-subjects" role="group" aria-label="Subject"></div>
+    </div>
+    <p class="pj-count" id="pj-count" aria-live="polite"></p>
+    <div class="pj-grid" id="pj-list"></div>
+    <p class="pj-foot">Print times are approximate and depend on the printer and settings. Favourites are saved on this device only.</p>
+  </div>
+</div>
 <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

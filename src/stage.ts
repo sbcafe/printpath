@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { palette } from './theme';
 
 export class Stage {
   readonly renderer: THREE.WebGLRenderer;
@@ -87,6 +88,14 @@ export class Stage {
     if (instant) { this.camera.position.copy(this.toPos); this.controls.target.copy(this.toTgt); }
   }
 
+  /** Swap the scene palette (background, exposure, environment). Beds are rebuilt by their owners. */
+  applyPalette() {
+    const p = palette();
+    (this.scene.background as THREE.Color).setHex(p.bg);
+    this.scene.environmentIntensity = p.envIntensity;
+    this.renderer.toneMappingExposure = p.exposure;
+  }
+
   /** Jump to the end of the current camera move. */
   snap() { this.tweenT = 1; this.camera.position.copy(this.toPos); this.controls.target.copy(this.toTgt); }
 
@@ -120,15 +129,16 @@ export function disposeTree(root: THREE.Object3D, keep: Set<unknown> = new Set()
 
 /** A 120 x 120 mm build plate with a 10 mm grid. */
 export function makeBed(size = 120): THREE.Group {
+  const pal = palette();
   const g = new THREE.Group();
   const plate = new THREE.Mesh(
     new THREE.BoxGeometry(size, 2, size),
-    new THREE.MeshStandardMaterial({ color: 0x1d252e, roughness: 0.7, metalness: 0.2 }),
+    new THREE.MeshStandardMaterial({ color: pal.bedPlate, roughness: 0.7, metalness: 0.2 }),
   );
   plate.position.y = -1.02;
-  const grid = new THREE.GridHelper(size, size / 10, 0x3fc7ff, 0x2c3a47);
+  const grid = new THREE.GridHelper(size, size / 10, pal.gridMain, pal.gridLine);
   (grid.material as THREE.Material).transparent = true;
-  (grid.material as THREE.Material).opacity = 0.55;
+  (grid.material as THREE.Material).opacity = pal.gridOpacity;
   grid.position.y = 0.01;
   g.add(plate, grid);
   return g;

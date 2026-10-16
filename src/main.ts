@@ -1,46 +1,65 @@
 import './style.css';
 import * as THREE from 'three';
-import { Stage, makeBed } from './stage';
-import { buildPart, clampParams, DEFAULT_PARAMS, maxHole, meshVolume, partHeight, type PartParams } from './part';
+import { Stage, makeBed, disposeTree } from './stage';
+import { meshVolume } from './part';
+import { PRESETS, presetById, cleanParams, type Params, type Preset } from './presets';
+import { DesignerControls } from './designer';
 import { sliceMesh, type SliceResult } from './slicer';
 import { buildToolpath, formatDuration, type Toolpath } from './toolpath';
 import { StlView, pickFacets, asciiFacet, asciiSize, stlBlob, downloadBlob, FACET_COLORS, type Facet } from './stlview';
 import { SliceView } from './sliceview';
 import { PrintSim, TIP_Y } from './printer';
 import { Hum } from './audio';
+import { applyTheme, readTheme, palette, theme, COPY, type ThemeId } from './theme';
+import { Favourites, browserStorage } from './projects/favourites';
+import { PROJECT_IDS, type Project } from './projects/catalog';
+import { ProjectsView } from './projects/view';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
-const STEPS = [
-  { name: 'Design', explain: 'Design: you build a part from simple solids (plate + boss − hole), the way CAD combines shapes.' },
-  { name: 'STL', explain: 'STL: the printer never sees your design, only a list of flat triangles, each with an “outside” arrow (normal).' },
-  { name: 'Slice', explain: 'Slice: the slicer cuts the triangles into thin layers and plans every nozzle move: walls, then infill.' },
-  { name: 'Print', explain: 'Print: the printer follows that plan, melting plastic into a thin bead, one layer on top of the last.' },
-];
+const STEP_NAMES = ['Design', 'STL', 'Slice', 'Print'];
 
+applyTheme(readTheme());
 const stage = new Stage($<HTMLCanvasElement>('#c'), $('#top'), $('#panel'));
+stage.applyPalette();
 const hum = new Hum();
 
 // ---------- shared part state ----------
-let params: PartParams = { ...DEFAULT_PARAMS };
-const partMat = new THREE.MeshStandardMaterial({ color: 0xf07a35, roughness: 0.48, metalness: 0.0 });
+let preset: Preset = PRESETS[0];
+let params: Params = { ...preset.defaults };
+const partMat = new THREE.MeshStandardMaterial({ color: palette().part, roughness: 0.48, metalness: 0.0 });
 const partMesh = new THREE.Mesh(new THREE.BufferGeometry(), partMat);
-const bed = makeBed();
+let bed = makeBed();
 stage.scene.add(bed, partMesh);
 let partVersion = 0;
+let controls: DesignerControls | null = null;
 
-const slice = { layerHeight: 0.2, infill: 20, walls: 2, layer: 0, below: false };
+const slice = { layerHeight: 0.2, infill: 20, walls: 2, layer: -1, below: false };
 let sliced: { key: string; sr: SliceResult; tp: Toolpath } | null = null;
 let stlInfo: { version: number; ascii: number; facets: Facet[] } | null = null;
 
 function rebuildPart() {
-  params = clampParams(params);
-  const g = buildPart(params);
-  partMesh.geometry.dispose();
+  params = cleanParams(preset, params);
+  const g = preset.build(params);
+  partMesh.geometry.dispose(); // old preset/params geometry
   partMesh.geometry = g;
   partVersion++;
   sliced = null; stlInfo = null;
-  const vol = meshVolume(g) / 1000; // cm^3
-  $('#design-stat').textContent = `${params.width} × ${params.depth} × ${partHeight(params)} mm · ${vol.toFixed(1)} cm³ · ≈${(vol * 1.24).toFixed(0)} g PLA if solid`;
+  const bb = g.boundingBox!, vol = meshVolume(g) / 1000;
+  const d = (v: number) => Math.round(v * 10) / 10;
+  $('#design-stat').textContent = `${d(bb.max.x - bb.min.x)} × ${d(bb.max.z - bb.min.z)} × ${d(bb.max.y)} mm · ${vol.toFixed(1)} cm³ · ≈${Math.max(1, Math.round(vol * 1.24))} g PLA if solid`;
+  controls?.sync(params);
+}
+
+function setPreset(id: string, overrides: Params = {}) {
+  const p = presetById(id) ?? PRESETS[0];
+  preset = p;
+  params = cleanParams(p, { ...p.defaults, ...overrides });
+  $<HTMLSelectElement>('#d-preset').value = p.id;
+  $('#design-note').textContent = p.note ?? '';
+  controls = new DesignerControls($('#d-controls'), p, params, (key, value) => { params = { ...params, [key]: value }; schedulePart(); });
+  slice.layer = -1;
+  rebuildPart();
+  if (step === 0) framePart(1.05);
 }
 
 function ensureSliced(): { sr: SliceResult; tp: Toolpath } {
@@ -53,9 +72,9 @@ function ensureSliced(): { sr: SliceResult; tp: Toolpath } {
   return sliced;
 }
 
-function framePart(scale = 1, yBias = 0) {
+function framePart(scale = 1) {
   const s = partMesh.geometry.boundingSphere!;
-  stage.frame(s.center.x, s.center.y + yBias, s.center.z, s.radius * scale);
+  stage.frame(s.center.x, s.center.y, s.center.z, s.radius * scale);
 }
 
 // ---------- step views ----------
@@ -69,21 +88,23 @@ const designView: View = {
   exit() {},
 };
 
+const kb = (b: number) => (b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
 const stlViewCtl: View = {
   enter() {
     partMesh.visible = true; bed.visible = true;
     const g = partMesh.geometry;
     const tris = g.attributes.position.count / 3;
     if (!stlInfo || stlInfo.version !== partVersion) {
-      const holeR = params.hole / 2, bossR = params.boss ? params.hole / 2 + 3 : 0;
-      stlInfo = { version: partVersion, ascii: asciiSize(g), facets: pickFacets(g, holeR, bossR) };
+      const r = preset.radii?.(params) ?? { hole: 0, boss: 0 };
+      stlInfo = { version: partVersion, ascii: asciiSize(g), facets: pickFacets(g, r.hole, r.boss) };
     }
     stlView = new StlView(g, stlInfo.facets);
     stlView.setWire($<HTMLInputElement>('#stl-wire').checked);
     stage.scene.add(stlView.group);
     $('#stl-tris').textContent = tris.toLocaleString();
     $('#stl-bin').textContent = kb(84 + 50 * tris);
-    $('#stl-ascii').textContent = `${kb(stlInfo.ascii)} (${(stlInfo.ascii / (84 + 50 * tris)).toFixed(1)}×)`;
+    $('#stl-ascii').textContent = kb(stlInfo.ascii);
+    $('#stl-ascii-cap').textContent = `ASCII STL (${(stlInfo.ascii / (84 + 50 * tris)).toFixed(1)}× bigger)`;
     const tabs = $('#stl-facets');
     tabs.innerHTML = '';
     stlInfo.facets.forEach((f, i) => {
@@ -102,14 +123,9 @@ function showFacet(i: number) {
   $('#stl-snippet').textContent = asciiFacet(stlInfo.facets[i]);
   [...$('#stl-facets').children].forEach((c, k) => c.classList.toggle('on', k === i));
 }
-const kb = (b: number) => (b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
 
 const sliceViewCtl: View = {
-  enter() {
-    partMesh.visible = false; bed.visible = true;
-    rebuildSliceView();
-    framePart(1.05);
-  },
+  enter() { partMesh.visible = false; bed.visible = true; rebuildSliceView(); framePart(1.05); },
   exit() { sliceView?.dispose(); sliceView = null; },
 };
 function rebuildSliceView() {
@@ -120,8 +136,8 @@ function rebuildSliceView() {
   const n = sr.layers.length;
   const lr = $<HTMLInputElement>('#s-layer');
   lr.max = String(n);
-  slice.layer = Math.min(slice.layer, n - 1);
   if (slice.layer < 0) slice.layer = Math.floor(n * 0.3);
+  slice.layer = Math.min(slice.layer, n - 1);
   lr.value = String(slice.layer + 1);
   sliceView.setLayer(slice.layer, slice.below);
   syncOutputs();
@@ -130,6 +146,7 @@ function rebuildSliceView() {
   $('#sl-time').textContent = `~${formatDuration(tp.time)}`;
 }
 
+let keepPrintT = -1;
 const printViewCtl: View = {
   enter() {
     partMesh.visible = false; bed.visible = false;
@@ -137,10 +154,11 @@ const printViewCtl: View = {
     sim = new PrintSim(tp, partMesh.geometry);
     sim.speed = Number($<HTMLInputElement>('#pr-speed').value);
     sim.setCutaway($<HTMLInputElement>('#pr-cut').checked);
+    if (keepPrintT >= 0) { sim.t = Math.min(keepPrintT, tp.time); sim.update(0); keepPrintT = -1; }
     stage.scene.add(sim.group);
-    const h = partHeight(params);
-    const s = partMesh.geometry.boundingSphere!;
+    const s = partMesh.geometry.boundingSphere!, h = partMesh.geometry.boundingBox!.max.y;
     stage.frame(0, TIP_Y - h * 0.5 + 4, 0, Math.max(s.radius * 1.75, 36));
+    hudLast = '';
     updatePrintHud();
   },
   exit() { sim?.dispose(); sim = null; hum.stop(); setPlayLabel(); },
@@ -165,27 +183,57 @@ function setPlayLabel() {
 
 const views: View[] = [designView, stlViewCtl, sliceViewCtl, printViewCtl];
 let step = -1;
+function setCopy() {
+  const c = COPY[theme()];
+  $('#explain').textContent = c.explain[step] ?? '';
+  const tip = c.tips?.[step];
+  $('#tip').innerHTML = tip ? `<span aria-hidden="true">💡</span> <b>Teacher tip:</b> ${tip}` : '';
+}
 function go(i: number) {
   i = Math.max(0, Math.min(3, i));
   if (i === step) return;
   if (step >= 0) views[step].exit();
   step = i;
   document.querySelectorAll<HTMLElement>('.pane').forEach((p) => (p.hidden = Number(p.dataset.pane) !== i));
-  document.querySelectorAll<HTMLButtonElement>('#stepper button').forEach((b, k) => { b.classList.toggle('on', k === i); b.classList.toggle('done', k < i); });
-  $('#explain').textContent = STEPS[i].explain;
+  document.querySelectorAll<HTMLButtonElement>('#stepper button').forEach((b, k) => {
+    b.classList.toggle('on', k === i); b.classList.toggle('done', k < i);
+    if (k === i) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+  });
+  setCopy();
   $('#stepno').textContent = `Step ${i + 1} of 4`;
   $<HTMLButtonElement>('#back').disabled = i === 0;
-  $('#next').textContent = i === 3 ? '↺ New part' : `Next: ${STEPS[i + 1].name} ›`;
+  $('#next').textContent = i === 3 ? '↺ New part' : `Next: ${STEP_NAMES[i + 1]} ›`;
   stage.layout();
   views[i].enter();
 }
+
+// ---------- theme ----------
+function setTheme(t: ThemeId) {
+  applyTheme(t);
+  document.querySelectorAll<HTMLButtonElement>('[data-theme-btn]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeBtn === t)));
+  stage.applyPalette();
+  partMat.color.setHex(palette().part);
+  // rebuild palette-dependent scene pieces (dispose the old ones)
+  const vis = bed.visible;
+  disposeTree(bed);
+  bed = makeBed(); bed.visible = vis; stage.scene.add(bed);
+  if (step >= 0) {
+    if (step === 3 && sim) keepPrintT = sim.t;
+    const wasPlaying = sim?.playing ?? false;
+    views[step].exit();
+    views[step].enter();
+    if (sim && wasPlaying) sim.playing = true;
+    setCopy();
+  }
+  requestAnimationFrame(stage.layout); // font sizes change the header/panel height
+}
+document.querySelectorAll<HTMLButtonElement>('[data-theme-btn]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeBtn as ThemeId)));
 
 // ---------- controls ----------
 function syncOutputs() {
   document.querySelectorAll<HTMLOutputElement>('output[data-for]').forEach((o) => {
     const inp = document.getElementById(o.dataset.for!) as HTMLInputElement;
-    const v = Number(inp.value);
-    const id = inp.id;
+    const v = Number(inp.value), id = inp.id;
     o.textContent = id === 's-infill' ? `${v}%` : id === 'pr-speed' ? `${v}×` : id === 's-layer' ? `${v} / ${inp.max}` : id === 's-lh' ? `${v.toFixed(2)} mm` : `${v} mm`;
   });
 }
@@ -193,39 +241,27 @@ const bind = (id: string, get: () => number, set: (v: number) => void) => {
   const el = document.getElementById(id) as HTMLInputElement;
   el.value = String(get());
   el.addEventListener('input', () => { set(Number(el.value)); syncOutputs(); });
-  return el;
 };
 let partTimer = 0;
-const schedulePart = () => {
-  cancelAnimationFrame(partTimer);
-  partTimer = requestAnimationFrame(() => {
-    rebuildPart();
-    const hole = $<HTMLInputElement>('#p-hole');
-    hole.max = String(maxHole(params));
-    hole.value = String(params.hole);
-    syncOutputs();
-  });
-};
-(['width', 'depth', 'height', 'hole'] as const).forEach((k) => bind(`p-${k}`, () => params[k], (v) => { params = { ...params, [k]: v }; schedulePart(); }));
-for (const k of ['boss', 'chamfer'] as const) {
-  const el = $<HTMLInputElement>(`#p-${k}`);
-  el.checked = params[k];
-  el.addEventListener('change', () => { params = { ...params, [k]: el.checked }; schedulePart(); });
-}
+const schedulePart = () => { cancelAnimationFrame(partTimer); partTimer = requestAnimationFrame(() => rebuildPart()); };
+
+const presetSel = $<HTMLSelectElement>('#d-preset');
+presetSel.innerHTML = PRESETS.map((p) => `<option value="${p.id}">${p.icon} ${p.name}</option>`).join('');
+presetSel.addEventListener('change', () => setPreset(presetSel.value));
+
 $<HTMLInputElement>('#stl-wire').addEventListener('change', (e) => stlView?.setWire((e.target as HTMLInputElement).checked));
-$('#stl-dl').addEventListener('click', () => downloadBlob(stlBlob(partMesh.geometry, true), `printpath-part-${params.width}x${params.depth}.stl`));
+$('#stl-dl').addEventListener('click', () => downloadBlob(stlBlob(partMesh.geometry, true), `printpath-${preset.id}.stl`));
 
 let sliceTimer = 0;
 const scheduleSlice = () => { clearTimeout(sliceTimer); sliceTimer = window.setTimeout(() => { if (step === 2) rebuildSliceView(); }, 120); };
 bind('s-lh', () => slice.layerHeight, (v) => { slice.layerHeight = v; scheduleSlice(); });
 bind('s-infill', () => slice.infill, (v) => { slice.infill = v; scheduleSlice(); });
-bind('s-layer', () => slice.layer + 1, (v) => { slice.layer = v - 1; sliceView?.setLayer(slice.layer, slice.below); });
+bind('s-layer', () => 1, (v) => { slice.layer = v - 1; sliceView?.setLayer(slice.layer, slice.below); });
 $<HTMLInputElement>('#s-below').addEventListener('change', (e) => { slice.below = (e.target as HTMLInputElement).checked; sliceView?.setLayer(slice.layer, slice.below); });
 const wallBtns = document.querySelectorAll<HTMLButtonElement>('[data-walls]');
 const syncWalls = () => wallBtns.forEach((b) => b.classList.toggle('on', Number(b.dataset.walls) === slice.walls));
 wallBtns.forEach((b) => b.addEventListener('click', () => { slice.walls = Number(b.dataset.walls); syncWalls(); scheduleSlice(); }));
 syncWalls();
-slice.layer = -1;
 
 bind('pr-speed', () => 25, (v) => { if (sim) sim.speed = v; });
 $('#pr-play').addEventListener('click', () => {
@@ -249,13 +285,25 @@ $('#back').addEventListener('click', () => go(step - 1));
 $('#next').addEventListener('click', () => go(step === 3 ? 0 : step + 1));
 document.querySelectorAll<HTMLButtonElement>('#stepper button').forEach((b) => b.addEventListener('click', () => go(Number(b.dataset.step))));
 
-// ---------- loop ----------
-rebuildPart();
-$<HTMLInputElement>('#p-hole').max = String(maxHole(params));
+// ---------- projects + favourites ----------
+const favourites = new Favourites(browserStorage(), PROJECT_IDS);
+const loadProject = (p: Project) => {
+  if (!p.preset) return;
+  setPreset(p.preset.id, p.preset.params ?? {});
+  if (step !== 0) go(0); else framePart(1.05);
+};
+const projects = new ProjectsView($('#projects'), favourites, loadProject);
+$('#open-projects').addEventListener('click', () => projects.open());
+
+// ---------- start ----------
+const q = new URLSearchParams(location.search);
+setPreset(q.get('preset') ?? 'plate');
+document.querySelectorAll<HTMLButtonElement>('[data-theme-btn]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeBtn === theme())));
 syncOutputs();
-const startStep = Number(new URLSearchParams(location.search).get('step') ?? 1) - 1;
+const startStep = Number(q.get('step') ?? 1) - 1;
 go(Number.isFinite(startStep) ? startStep : 0);
 stage.snap();
+if (q.get('projects') === '1') projects.open();
 let last = performance.now();
 stage.renderer.setAnimationLoop((now) => {
   const dt = Math.min(0.1, (now - last) / 1000);
@@ -267,6 +315,7 @@ stage.renderer.setAnimationLoop((now) => {
 
 // test/screenshot hook
 (window as unknown as { __pp: unknown }).__pp = {
-  go, stage, get sim() { return sim; }, get sliced() { return sliced; }, params: () => params,
+  go, stage, setTheme, setPreset, projects, favourites, loadProject,
+  get sim() { return sim; }, get sliced() { return sliced; }, params: () => params, preset: () => preset.id,
   setLayer: (i: number) => { slice.layer = i; $<HTMLInputElement>('#s-layer').value = String(i + 1); syncOutputs(); sliceView?.setLayer(i, slice.below); },
 };

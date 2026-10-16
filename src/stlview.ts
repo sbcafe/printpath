@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { disposeTree } from './stage';
+import { palette } from './theme';
 
 const exporter = new STLExporter();
 
@@ -91,7 +92,7 @@ export class StlView {
 
   constructor(geo: THREE.BufferGeometry, facets: Facet[]) {
     const wg = new THREE.WireframeGeometry(geo);
-    this.wire = new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ color: 0x0b0f14, transparent: true, opacity: 0.55 }));
+    this.wire = new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ color: palette().wire, transparent: true, opacity: palette().wireOpacity }));
     this.group.add(this.wire);
     const fp: number[] = [], fc: number[] = [];
     const col = new THREE.Color();

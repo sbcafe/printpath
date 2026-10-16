@@ -73,8 +73,8 @@ export class PrintSim {
     const black = new THREE.MeshStandardMaterial({ color: 0x15191e, roughness: 0.6, metalness: 0.3 });
     const top = TIP_Y + 26;
     for (const x of [-FRAME, FRAME]) for (const z of [-FRAME, FRAME]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(4, top + 30, 4), alu);
-      post.position.set(x, (top - 30) / 2, z);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(4, top + 110, 4), alu); // tall enough for a 100 mm part
+      post.position.set(x, (top - 110) / 2, z);
       this.group.add(post);
     }
     for (const x of [-FRAME, FRAME]) {

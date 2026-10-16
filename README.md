@@ -32,12 +32,29 @@ node tools/clip.mjs    # frame-captured print clip (encode with ffmpeg)
    `InstancedMesh`; playback only changes `count` and rewrites the one partial instance (`addUpdateRange`).
    Ghost part, play/pause, 1–100× speed, layer counter, progress, clipping-plane cut-away, optional Web Audio hum.
 
+## Educator theme, Projects, Favourites
+
+- **Theme switch** (header): *Studio* (dark) | *Educator* (light, ≥16 px type, larger controls, emoji step icons,
+  plain-language explainers and a Teacher tip per step, softer 3D palette). CSS variables in `src/style.css`
+  + a scene palette in `src/theme.ts`; saved in `localStorage` (`printpath.theme.v1`). `?theme=educator` also works.
+  `tests/contrast.test.ts` computes WCAG ratios from the real CSS variables.
+- **Projects** (`📚 Projects`): 12 classroom ideas in `src/projects/catalog.ts` (typed), filter by grade
+  (K-2/3-5/6-8/9-12) and subject; print times are approximate. Six have a designer preset (*Load in designer*),
+  the rest are marked *Idea only*. No external links, no company attributions.
+- **Designer presets** (`src/presets.ts`): mounting plate, name keychain (built-in 5×7 block font), cookie cutter
+  (circle/star/heart + grip rim), phone stand (wedge), pencil holder (round/hex), spur gear (trapezoid teeth + hub),
+  geometric solids. `tests/presets.test.ts` slices every preset at defaults and slider extremes.
+- **Favourites** (`src/projects/favourites.ts`): project ids only, `localStorage` key `printpath.favourites.v1`
+  (`{"v":1,"ids":[...]}`), newest first; corrupted/missing storage and unknown ids are handled.
+- Sync with the box mirror: see `docs/SYNC.md`.
+
 ## Simplifications (labelled)
 
 - Walls are miter offsets without self-intersection cleanup (fine for this part family).
 - Top skins are detected by a drop in layer area (no per-region skin), no supports/brim/retraction/acceleration.
 - Print time is a rough estimate, not a G-code simulation. No G-code export yet.
 - Bead is a 6-sided prism per move, not a swept tube.
+- Gear teeth are trapezoids, not involutes; keychain letters are a 5×7 pixel font; pointed solids have a 0.6 mm flat tip.
 
 ## Reference
 
