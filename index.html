@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0e1319" />
+<link rel="icon" href="data:," />
+<title>PrintPath — design to print</title>
+</head>
+<body>
+<canvas id="c" aria-label="3D view"></canvas>
+<header id="top">
+  <div class="brand"><b>PrintPath</b><span class="tag">prototype</span><span id="stepno">Step 1 of 4</span></div>
+  <nav id="stepper" aria-label="Steps">
+    <button data-step="0" class="on"><i>1</i><span>Design</span></button>
+    <button data-step="1"><i>2</i><span>STL</span></button>
+    <button data-step="2"><i>3</i><span>Slice</span></button>
+    <button data-step="3"><i>4</i><span>Print</span></button>
+  </nav>
+  <p id="explain"></p>
+</header>
+<section id="panel" aria-live="polite">
+  <div id="panel-body">
+    <div class="pane" data-pane="0">
+      <div class="ctl"><label for="p-width">Width</label><input id="p-width" type="range" min="20" max="80" step="1" /><output data-for="p-width"></output></div>
+      <div class="ctl"><label for="p-depth">Depth</label><input id="p-depth" type="range" min="20" max="60" step="1" /><output data-for="p-depth"></output></div>
+      <div class="ctl"><label for="p-height">Height</label><input id="p-height" type="range" min="3" max="12" step="0.5" /><output data-for="p-height"></output></div>
+      <div class="ctl"><label for="p-hole">Hole Ø</label><input id="p-hole" type="range" min="3" max="16" step="0.5" /><output data-for="p-hole"></output></div>
+      <div class="toggles">
+        <label class="tog"><input id="p-boss" type="checkbox" /><span>Boss</span></label>
+        <label class="tog"><input id="p-chamfer" type="checkbox" /><span>Chamfer corners</span></label>
+      </div>
+      <p class="stat" id="design-stat"></p>
+    </div>
+    <div class="pane" data-pane="1" hidden>
+      <div class="kpis">
+        <div><b id="stl-tris">–</b><span>triangles</span></div>
+        <div><b id="stl-bin">–</b><span>binary STL</span></div>
+        <div><b id="stl-ascii">–</b><span>ASCII STL</span></div>
+      </div>
+      <div class="toggles">
+        <label class="tog"><input id="stl-wire" type="checkbox" checked /><span>Show triangles</span></label>
+        <button id="stl-dl" class="btn primary">Download STL</button>
+      </div>
+      <p class="fine">Highlighted facets, as written in an ASCII STL (Z-up). Arrows are the normals: which way is “outside”.</p>
+      <div id="stl-facets" class="facet-tabs"></div>
+      <pre id="stl-snippet"></pre>
+    </div>
+    <div class="pane" data-pane="2" hidden>
+      <div class="ctl"><label for="s-lh">Layer height</label><input id="s-lh" type="range" min="0.1" max="0.4" step="0.05" /><output data-for="s-lh"></output></div>
+      <div class="ctl"><label for="s-infill">Infill</label><input id="s-infill" type="range" min="0" max="100" step="5" /><output data-for="s-infill"></output></div>
+      <div class="ctl"><label for="s-layer">Inspect layer</label><input id="s-layer" type="range" min="1" max="1" step="1" /><output data-for="s-layer"></output></div>
+      <div class="toggles">
+        <div class="seg" role="group" aria-label="Walls"><span>Walls</span><button data-walls="1">1</button><button data-walls="2">2</button></div>
+        <label class="tog"><input id="s-below" type="checkbox" /><span>Paths below</span></label>
+      </div>
+      <div class="kpis">
+        <div><b id="sl-layers">–</b><span>layers</span></div>
+        <div><b id="sl-len">–</b><span>filament path</span></div>
+        <div><b id="sl-time">–</b><span>print time (est.)</span></div>
+      </div>
+      <p class="legend"><i class="k outer"></i>outer wall <i class="k inner"></i>inner wall <i class="k infill"></i>infill <i class="k solid"></i>solid skin <i class="k travel"></i>travel</p>
+    </div>
+    <div class="pane" data-pane="3" hidden>
+      <div class="toggles">
+        <button id="pr-play" class="btn primary">▶ Print</button>
+        <button id="pr-restart" class="btn">↺ Restart</button>
+        <label class="tog"><input id="pr-cut" type="checkbox" /><span>Cut-away</span></label>
+        <label class="tog"><input id="pr-sound" type="checkbox" /><span>Sound</span></label>
+      </div>
+      <div class="ctl"><label for="pr-speed">Speed</label><input id="pr-speed" type="range" min="1" max="100" step="1" /><output data-for="pr-speed"></output></div>
+      <div class="progress"><div id="pr-bar"></div></div>
+      <div class="kpis">
+        <div><b id="pr-layer">–</b><span>layer</span></div>
+        <div><b id="pr-pct">0%</b><span>done</span></div>
+        <div><b id="pr-time">–</b><span>sim time (est.)</span></div>
+      </div>
+    </div>
+  </div>
+  <footer id="nav">
+    <button id="back" class="btn">‹ Back</button>
+    <button id="next" class="btn primary">Next ›</button>
+  </footer>
+</section>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
