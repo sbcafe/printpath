@@ -3,3 +3,5 @@ dist/
 *.log
 .shots/
 .sync/
+docs/SYNC.md
+scripts/sync.sh
