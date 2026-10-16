@@ -20,7 +20,7 @@ export interface Project {
   preset?: { id: PresetId; params?: Params };
 }
 
-export const CATALOG: Project[] = [
+const ENTRIES: Project[] = [
   {
     id: 'name-keychain', name: 'Name keychain', icon: '🔑',
     description: 'A small tag with your name in raised block letters and a hole for a key ring. A great first print that shows how thin layers stack up.',
@@ -88,6 +88,16 @@ export const CATALOG: Project[] = [
     grades: ['3-5', '6-8'], subjects: ['Science', 'Engineering', 'STEM'], printTime: '2–3 h', difficulty: 'Medium',
   },
 ];
+
+const STEM_PARTS: readonly Subject[] = ['Science', 'Math', 'Engineering'];
+
+/** Any Science, Math or Engineering project is also STEM, shown first. */
+function withStem(p: Project): Project {
+  if (p.subjects.includes('STEM') || !p.subjects.some((s) => STEM_PARTS.includes(s))) return p;
+  return { ...p, subjects: ['STEM', ...p.subjects] };
+}
+
+export const CATALOG: Project[] = ENTRIES.map(withStem);
 
 export const PROJECT_IDS = CATALOG.map((p) => p.id);
 

@@ -74,3 +74,13 @@ describe('favourites', () => {
     expect(filterProjects(CATALOG, { grade: '9-12', subject: 'Geography' }).map((p) => p.id)).toEqual(['topo-map']);
   });
 });
+
+describe('STEM tagging', () => {
+  it('tags every Science, Math or Engineering project as STEM', async () => {
+    const { CATALOG, filterProjects } = await import('../src/projects/catalog');
+    const stemish = CATALOG.filter((p) => p.subjects.some((s) => s === 'Science' || s === 'Math' || s === 'Engineering'));
+    for (const p of stemish) expect(p.subjects).toContain('STEM');
+    const stemIds = filterProjects(CATALOG, { subject: 'STEM' }).map((p) => p.id);
+    expect(stemIds).toEqual(expect.arrayContaining(['gear-set', 'bridge-challenge', 'topo-map', 'fraction-tiles', 'geometric-solids']));
+  });
+});
