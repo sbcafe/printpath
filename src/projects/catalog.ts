@@ -64,13 +64,15 @@ const ENTRIES: Project[] = [
   },
   {
     id: 'dna-helix', name: 'DNA double helix', icon: '🧬',
-    description: 'A twisted ladder model of DNA with snap-in base pairs. Needs supports, so it is a good lesson in overhangs.',
+    description: 'A twisted ladder model of DNA: two backbone strands joined by base-pair rungs on a stand. The strands overhang, so it is a good lesson in supports.',
     grades: ['6-8', '9-12'], subjects: ['Science', 'STEM'], printTime: '2–4 h', difficulty: 'Hard',
+    preset: { id: 'helix' },
   },
   {
     id: 'topo-map', name: 'Topographic map', icon: '🏔️',
     description: 'Stack contour layers into a 3D landscape of a hill, valley or island. Each print layer becomes a height line on a map.',
     grades: ['6-8', '9-12'], subjects: ['Geography', 'Science', 'Math'], printTime: '2–5 h', difficulty: 'Hard',
+    preset: { id: 'topo' },
   },
   {
     id: 'bridge-challenge', name: 'Bridge challenge', icon: '🌉',

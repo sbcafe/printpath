@@ -37,9 +37,13 @@ const slice = { layerHeight: 0.2, infill: 20, walls: 2, layer: -1, below: false 
 let sliced: { key: string; sr: SliceResult; tp: Toolpath } | null = null;
 let stlInfo: { version: number; ascii: number; facets: Facet[] } | null = null;
 
+let lastBuildMs = 0;
 function rebuildPart() {
   params = cleanParams(preset, params);
+  const t0 = performance.now();
   const g = preset.build(params);
+  lastBuildMs = performance.now() - t0;
+  $('#design-stat').classList.remove('busy');
   partMesh.geometry.dispose(); // old preset/params geometry
   partMesh.geometry = g;
   partVersion++;
@@ -53,6 +57,7 @@ function rebuildPart() {
 function setPreset(id: string, overrides: Params = {}) {
   const p = presetById(id) ?? PRESETS[0];
   preset = p;
+  cancelAnimationFrame(partTimer); clearTimeout(partDelay); lastBuildMs = 0;
   params = cleanParams(p, { ...p.defaults, ...overrides });
   $<HTMLSelectElement>('#d-preset').value = p.id;
   $('#design-note').textContent = p.note ?? '';
@@ -243,7 +248,15 @@ const bind = (id: string, get: () => number, set: (v: number) => void) => {
   el.addEventListener('input', () => { set(Number(el.value)); syncOutputs(); });
 };
 let partTimer = 0;
-const schedulePart = () => { cancelAnimationFrame(partTimer); partTimer = requestAnimationFrame(() => rebuildPart()); };
+let partDelay = 0;
+/** Fast presets rebuild every frame while dragging; slow ones (CSG-heavy, e.g. the helix) wait until the slider pauses. */
+const schedulePart = () => {
+  cancelAnimationFrame(partTimer); clearTimeout(partDelay);
+  if (lastBuildMs < 40) { partTimer = requestAnimationFrame(() => rebuildPart()); return; }
+  const stat = $('#design-stat');
+  stat.classList.add('busy'); stat.textContent = 'Updating…';
+  partDelay = window.setTimeout(() => rebuildPart(), 140);
+};
 
 const presetSel = $<HTMLSelectElement>('#d-preset');
 presetSel.innerHTML = PRESETS.map((p) => `<option value="${p.id}">${p.icon} ${p.name}</option>`).join('');

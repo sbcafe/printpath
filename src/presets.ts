@@ -5,8 +5,10 @@ import { Brush, Evaluator, ADDITION, SUBTRACTION, type CSGOperation } from 'thre
 import { buildPart, maxHole, type PartParams } from './part';
 import { offsetPoly, polyArea, pointInPolys, simplify, type Poly } from './slicer';
 import { textLoops, normalizeText } from './pixelfont';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { buildTerrain } from './terrain';
 
-export type PresetId = 'plate' | 'keychain' | 'cookie' | 'stand' | 'pencil' | 'gear' | 'solid';
+export type PresetId = 'plate' | 'keychain' | 'cookie' | 'stand' | 'pencil' | 'gear' | 'solid' | 'helix' | 'topo';
 export type Value = number | boolean | string;
 export type Params = Record<string, Value>;
 export type Control =
@@ -145,6 +147,107 @@ export function gearOutline(teeth: number, module: number): Poly {
     at(rr, c - a * 0.3); at(ra, c - a * 0.12); at(ra, c + a * 0.12); at(rr, c + a * 0.3); at(rr, c + a * 0.5);
   }
   return p;
+}
+
+
+// ---------------------------------------------------------------- DNA helix
+/** Merge closed, non-touching parts into one brush (no CSG needed when they don't overlap). */
+function merged(parts: THREE.BufferGeometry[]): Brush {
+  const flat = parts.map((g) => {
+    const ng = g.index ? g.toNonIndexed() : g;
+    if (ng !== g) g.dispose();
+    for (const k of Object.keys(ng.attributes)) if (k !== 'position') ng.deleteAttribute(k);
+    return ng;
+  });
+  const m = mergeGeometries(flat, false)!;
+  flat.forEach((g) => g.dispose());
+  m.computeVertexNormals();
+  return brush(m);
+}
+
+/** A closed tube swept along a helix (radius R, axis = Y) between y0 and y1, with flat end caps. */
+export function helixTube(R: number, r: number, y0: number, y1: number, theta: (y: number) => number, segPerTurn = 40, radial = 10): THREE.BufferGeometry {
+  const turns = Math.abs(theta(y1) - theta(y0)) / (Math.PI * 2);
+  const segs = Math.max(8, Math.ceil(turns * segPerTurn));
+  const dy = 1e-3;
+  const pos: number[] = [];
+  const rings: THREE.Vector3[][] = [];
+  const centres: THREE.Vector3[] = [];
+  for (let s = 0; s <= segs; s++) {
+    const y = y0 + ((y1 - y0) * s) / segs, t = theta(y);
+    const c = new THREE.Vector3(R * Math.cos(t), y, R * Math.sin(t));
+    const t2 = theta(y + dy);
+    const T = new THREE.Vector3(R * Math.cos(t2), y + dy, R * Math.sin(t2)).sub(c).normalize();
+    const N = new THREE.Vector3(-Math.cos(t), 0, -Math.sin(t)); // towards the axis, perpendicular to T
+    const B = new THREE.Vector3().crossVectors(T, N);
+    const ring: THREE.Vector3[] = [];
+    for (let k = 0; k < radial; k++) {
+      const a = (k / radial) * Math.PI * 2;
+      ring.push(c.clone().addScaledVector(N, Math.cos(a) * r).addScaledVector(B, Math.sin(a) * r));
+    }
+    rings.push(ring); centres.push(c);
+  }
+  const push = (...v: THREE.Vector3[]) => { for (const p of v) pos.push(p.x, p.y, p.z); };
+  for (let s = 0; s < segs; s++) for (let k = 0; k < radial; k++) {
+    const a = rings[s][k], b = rings[s][(k + 1) % radial], c = rings[s + 1][k], d = rings[s + 1][(k + 1) % radial];
+    push(a, c, b); push(b, c, d);
+  }
+  for (let k = 0; k < radial; k++) {
+    push(centres[0], rings[0][k], rings[0][(k + 1) % radial]);
+    push(centres[segs], rings[segs][(k + 1) % radial], rings[segs][k]);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  if (signedVolume(g) < 0) flip(g);
+  return g;
+}
+
+function signedVolume(g: THREE.BufferGeometry): number {
+  const a = g.attributes.position.array;
+  let v = 0;
+  for (let i = 0; i < a.length; i += 9) {
+    v += a[i] * (a[i + 4] * a[i + 8] - a[i + 5] * a[i + 7]) - a[i + 1] * (a[i + 3] * a[i + 8] - a[i + 5] * a[i + 6]) + a[i + 2] * (a[i + 3] * a[i + 7] - a[i + 4] * a[i + 6]);
+  }
+  return v / 6;
+}
+function flip(g: THREE.BufferGeometry) {
+  const a = g.attributes.position.array as Float32Array;
+  for (let i = 0; i < a.length; i += 9) for (let k = 0; k < 3; k++) { const t = a[i + 3 + k]; a[i + 3 + k] = a[i + 6 + k]; a[i + 6 + k] = t; }
+}
+
+export interface HelixParams { height: number; turns: number; radius: number; strand: number; rungs: number; post: boolean }
+
+export function buildHelix(p: HelixParams): THREE.BufferGeometry {
+  const H = p.height, R = p.radius, rs = p.strand / 2, rr = Math.max(0.9, rs * 0.6), Tb = 3;
+  const theta = (y: number) => (Math.PI * 2 * p.turns * (y - Tb)) / (H - Tb);
+  // strands run 2 mm past both cut planes, so the cuts give flat ends and a flat underside
+  const ext = 2 + rs;
+  const strands = [0, Math.PI].map((ph) => helixTube(R, rs, -ext, H + ext, (y) => theta(y) + ph));
+  if (p.post) {
+    const rp = Math.min(3, R - rs - 2.5);
+    const post = new THREE.CylinderGeometry(rp, rp, H + 2 * ext, 32);
+    post.translate(0, H / 2, 0);
+    strands.push(post);
+  }
+  const rungs: THREE.BufferGeometry[] = [];
+  const yLo = Tb + 2 + rr, yHi = H - rs - rr - 2;
+  const n = Math.max(1, Math.round(p.rungs));
+  for (let i = 0; i < n; i++) {
+    const y = n === 1 ? (yLo + yHi) / 2 : yLo + ((yHi - yLo) * i) / (n - 1);
+    const c = new THREE.CylinderGeometry(rr, rr, 2 * R, 12); // spans strand centre to strand centre
+    c.rotateZ(Math.PI / 2); // along +X
+    c.rotateY(-theta(y)); // point at the strand at this height
+    c.translate(0, y, 0);
+    rungs.push(c);
+  }
+  let b = csg(merged(strands), merged(rungs), ADDITION);
+  const disc = new THREE.CylinderGeometry(R + rs + 5, R + rs + 5, Tb + 1, 72);
+  disc.translate(0, (Tb - 1) / 2, 0); // y = -1 .. Tb, so the cut at y = 0 passes through solid plastic
+  b = csg(b, brush(disc), ADDITION);
+  const below = new THREE.BoxGeometry(400, 40, 400); below.translate(0, -20, 0);
+  const above = new THREE.BoxGeometry(400, 40, 400); above.translate(0, H + 20, 0);
+  b = csg(b, merged([below, above]), SUBTRACTION);
+  return b.geometry;
 }
 
 // ---------------------------------------------------------------- presets
@@ -312,6 +415,35 @@ export const PRESETS: Preset[] = [
       else g = new THREE.CylinderGeometry(r, r, s, 64);
       return finalize(g);
     },
+  },
+  {
+    id: 'helix', name: 'DNA double helix', icon: '🧬',
+    controls: [
+      { kind: 'slider', key: 'height', label: 'Height', min: 40, max: 110, step: 1, unit: 'mm' },
+      { kind: 'slider', key: 'turns', label: 'Turns', min: 0.5, max: 3, step: 0.25 },
+      { kind: 'slider', key: 'radius', label: 'Helix radius', min: 8, max: 20, step: 0.5, unit: 'mm' },
+      { kind: 'slider', key: 'strand', label: 'Strand Ø', min: 3, max: 6, step: 0.5, unit: 'mm' },
+      { kind: 'slider', key: 'rungs', label: 'Base pairs', min: 4, max: 30, step: 1 },
+      { kind: 'toggle', key: 'post', label: 'Centre post' },
+    ],
+    defaults: { height: 80, turns: 1.5, radius: 12, strand: 4, rungs: 14, post: false },
+    note: 'Prints standing up on its base disc. The strands and the flat base-pair rungs overhang, so turn on supports (or the centre post, which holds every rung up).',
+    limits: (p) => ({ turns: Math.max(0.5, Math.floor(((num(p, 'height') - 3) / (num(p, 'strand') + 3)) * 4) / 4) }),
+    build: (p) => finalize(buildHelix({ height: num(p, 'height'), turns: num(p, 'turns'), radius: num(p, 'radius'), strand: num(p, 'strand'), rungs: num(p, 'rungs'), post: bool(p, 'post') })),
+  },
+  {
+    id: 'topo', name: 'Topographic map', icon: '🏔️',
+    controls: [
+      { kind: 'slider', key: 'seed', label: 'Seed', min: 1, max: 999, step: 1 },
+      { kind: 'choice', key: 'land', label: 'Landscape', options: [['hills', 'Hills'], ['island', 'Island']] },
+      { kind: 'slider', key: 'size', label: 'Tile size', min: 40, max: 100, step: 1, unit: 'mm' },
+      { kind: 'slider', key: 'levels', label: 'Contour levels', min: 3, max: 10, step: 1 },
+      { kind: 'slider', key: 'relief', label: 'Height scale', min: 5, max: 30, step: 0.5, unit: 'mm' },
+      { kind: 'toggle', key: 'terraced', label: 'Terraced steps' },
+    ],
+    defaults: { seed: 42, land: 'hills', size: 70, levels: 6, relief: 14, terraced: true },
+    note: 'Made up from a seeded noise pattern: the same seed always gives the same landscape. Flat 2 mm base, no supports needed.',
+    build: (p) => finalize(buildTerrain({ seed: Math.round(num(p, 'seed')), size: num(p, 'size'), levels: Math.round(num(p, 'levels')), relief: num(p, 'relief'), base: 2, terraced: bool(p, 'terraced'), island: p.land === 'island' })),
   },
 ];
 
